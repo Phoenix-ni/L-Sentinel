@@ -9,6 +9,12 @@ DB_PATH = os.path.join(BASE_DIR, "data.db")
 # 统一数据库连接字符串 (默认使用 SQLite，云端或 TiDB 可通过 DATABASE_URL 环境变量配置)
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
+# 兼容性处理：如果配置为 mysql://，SQLAlchemy 默认会寻找 MySQLdb 驱动而报错
+# 我们通过代码将其自动重定向至 mysql+pymysql:// 以使用 pymysql 驱动
+if DATABASE_URL.startswith("mysql://"):
+    DATABASE_URL = DATABASE_URL.replace("mysql://", "mysql+pymysql://", 1)
+
+
 # LLM（OpenAI 兼容接口）配置
 # 需求提供：baseurl: https://api.longcat.chat/openai, api_key: ak_2Iz7Ww4KH2440E19yI3n69RN0er2I
 OPENAI_API_KEY = "ak_2Iz7Ww4KH2440E19yI3n69RN0er2I"

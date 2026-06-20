@@ -116,7 +116,7 @@ docker run -d \
    * **Instance Type**：选择 **Free**（完全免费）。
 4. **配置环境变量 (Environment Variables)**：
    点击 Environment 选项卡，添加以下变量：
-   * `DATABASE_URL`：填入上面第一步复制的 TiDB 连接字符串。*(程序只要检测到该变量，就会自动无缝切换至 TiDB 集群运行)*
+   * `DATABASE_URL`：填入上面第一步复制的 TiDB 连接字符串。*(注意：即便您粘贴的是以 `mysql://` 开头的原生格式，系统也已内置了自动转换逻辑，会自动将其重定向为 `mysql+pymysql://`，彻底规避因缺少 `MySQLdb` 驱动导致的错误)*
    * `ADMIN_PASSWORD`：设置您的管理员初始密码。*(系统首次启动时会自动将其哈希后存入数据库；如果后续需要重置密码，直接修改此环境变量即可)*
    * `OPENAI_API_KEY`：填入您的 LLM API 密钥 *(例如默认的 `ak_2Iz7Ww4KH2440E19yI3n69RN0er2I`)*。
    * `OPENAI_BASE_URL`：填入大模型的中转地址 *(例如 `https://api.longcat.chat/openai`)*。
