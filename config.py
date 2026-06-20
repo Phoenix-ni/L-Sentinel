@@ -18,20 +18,22 @@ elif DATABASE_URL.startswith("mysql+"):
         _, rest = DATABASE_URL.split("://", 1)
         DATABASE_URL = "mysql+pymysql://" + rest
 
-# 自动处理 SSL CA 证书的本地物理路径在 Docker 容器或 Render 中不存在时的兼容
+# 自动处理 SSL CA 证书路径，并剔除 PyMySQL 驱动不支持的 file:// 协议前缀
 if "ssl_ca=" in DATABASE_URL:
     import re
     match = re.search(r"ssl_ca=([^&]+)", DATABASE_URL)
     if match:
         ca_path = match.group(1)
+        # 1. 取得干净的绝对物理路径（去除 PyMySQL 不支持的 file:// 前缀）
         clean_path = ca_path.replace("file://", "")
-        # 如果 CA 路径在当前环境不存在（例如容器中找不到 /home/zyb/Downloads/），自动指向容器内的系统 CA
+        # 2. 如果该路径在当前环境不存在（例如容器中没有 /home/zyb/Downloads/），自动指向容器内的系统 CA 证书
         if not os.path.exists(clean_path):
             system_ca = "/etc/ssl/certs/ca-certificates.crt"
             if os.path.exists(system_ca):
-                DATABASE_URL = DATABASE_URL.replace(ca_path, f"file://{system_ca}")
-            else:
-                DATABASE_URL = DATABASE_URL.replace(ca_path, system_ca)
+                clean_path = system_ca
+        # 3. 在 URL 中用干净的纯绝对路径替换原有的 ca_path
+        DATABASE_URL = DATABASE_URL.replace(ca_path, clean_path)
+
 
 # 过滤掉 pymysql 驱动不支持的 ssl_mode 参数，防止报错: got an unexpected keyword argument 'ssl_mode'
 if "ssl_mode=" in DATABASE_URL:
