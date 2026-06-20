@@ -18,7 +18,14 @@ elif DATABASE_URL.startswith("mysql+"):
         _, rest = DATABASE_URL.split("://", 1)
         DATABASE_URL = "mysql+pymysql://" + rest
 
-# 自动处理 SSL CA 证书路径，并剔除 PyMySQL 驱动不支持的 file:// 协议前缀
+# 针对 TiDB Cloud (包含 tidbcloud.com) 且未显式配置 ssl_ca 的极简格式，自动在后台补全 CA 证书安全连接参数
+if "tidbcloud.com" in DATABASE_URL and "ssl_ca=" not in DATABASE_URL:
+    system_ca = "/etc/ssl/certs/ca-certificates.crt"
+    if os.path.exists(system_ca):
+        connector = "&" if "?" in DATABASE_URL else "?"
+        DATABASE_URL += f"{connector}ssl_ca={system_ca}"
+
+# 自动处理 SSL CA 证书路径，并剔除 PyMySQL 驱动不支持 of file:// 协议前缀
 if "ssl_ca=" in DATABASE_URL:
     import re
     match = re.search(r"ssl_ca=([^&]+)", DATABASE_URL)
