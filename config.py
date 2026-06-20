@@ -33,6 +33,13 @@ if "ssl_ca=" in DATABASE_URL:
             else:
                 DATABASE_URL = DATABASE_URL.replace(ca_path, system_ca)
 
+# 过滤掉 pymysql 驱动不支持的 ssl_mode 参数，防止报错: got an unexpected keyword argument 'ssl_mode'
+if "ssl_mode=" in DATABASE_URL:
+    import re
+    DATABASE_URL = re.sub(r"ssl_mode=[^&]+&?", "", DATABASE_URL)
+    DATABASE_URL = DATABASE_URL.rstrip("&").rstrip("?")
+
+
 
 
 # LLM（OpenAI 兼容接口）配置
