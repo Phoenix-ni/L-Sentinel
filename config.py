@@ -9,10 +9,30 @@ DB_PATH = os.path.join(BASE_DIR, "data.db")
 # 统一数据库连接字符串 (默认使用 SQLite，云端或 TiDB 可通过 DATABASE_URL 环境变量配置)
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
-# 兼容性处理：如果配置为 mysql://，SQLAlchemy 默认会寻找 MySQLdb 驱动而报错
+# 兼容性处理：如果配置为 mysql:// 或 mysql+mysqldb://，SQLAlchemy 默认会寻找 MySQLdb 驱动而报错
 # 我们通过代码将其自动重定向至 mysql+pymysql:// 以使用 pymysql 驱动
 if DATABASE_URL.startswith("mysql://"):
     DATABASE_URL = DATABASE_URL.replace("mysql://", "mysql+pymysql://", 1)
+elif DATABASE_URL.startswith("mysql+"):
+    if "://" in DATABASE_URL:
+        _, rest = DATABASE_URL.split("://", 1)
+        DATABASE_URL = "mysql+pymysql://" + rest
+
+# 自动处理 SSL CA 证书的本地物理路径在 Docker 容器或 Render 中不存在时的兼容
+if "ssl_ca=" in DATABASE_URL:
+    import re
+    match = re.search(r"ssl_ca=([^&]+)", DATABASE_URL)
+    if match:
+        ca_path = match.group(1)
+        clean_path = ca_path.replace("file://", "")
+        # 如果 CA 路径在当前环境不存在（例如容器中找不到 /home/zyb/Downloads/），自动指向容器内的系统 CA
+        if not os.path.exists(clean_path):
+            system_ca = "/etc/ssl/certs/ca-certificates.crt"
+            if os.path.exists(system_ca):
+                DATABASE_URL = DATABASE_URL.replace(ca_path, f"file://{system_ca}")
+            else:
+                DATABASE_URL = DATABASE_URL.replace(ca_path, system_ca)
+
 
 
 # LLM（OpenAI 兼容接口）配置
