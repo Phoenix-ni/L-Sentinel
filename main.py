@@ -1,4 +1,6 @@
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from config import CRAWL_LIMIT
 import database
 import crawler
@@ -45,24 +47,18 @@ def run_pipeline(hours=None, progress_callback=None):
     new_inserted_count = 0
     relevant_count = 0
     skipped_count = 0
+    to_eval_topics = []
     
-    # 3. 遍历帖子进行增量处理
+    # 3. 快速前置筛选（去重和本地粗筛，由于在本地且速度极快，直接串行过滤）
     for idx, topic in enumerate(raw_topics, 1):
         topic_id = topic["id"]
         title = topic["title"]
         
-        # 进度百分比从 20% 渐进到 95%
-        percent = int(20 + (idx / total) * 75)
-        
         # 检查是否已处理过
         if database.check_exists(topic_id):
             skipped_count += 1
-            update_progress("syncing", percent, f"[{idx}/{total}] 帖子已存在，跳过: {title}")
             continue
             
-        print(f"\n>>> 正在处理新帖子 [{idx}/{len(raw_topics)}]: {title}")
-        update_progress("syncing", percent, f"[{idx}/{total}] 正在本地粗筛: {title}")
-        
         # 本地粗筛
         is_keyword_hit = filter.keyword_filter(
             title=topic["title"],
@@ -78,34 +74,66 @@ def run_pipeline(hours=None, progress_callback=None):
             topic["value_score"] = 0
             database.insert_topic(topic)
             new_inserted_count += 1
-            print(" -> 本地粗筛判定为：不相关。已记录到数据库去重表中。")
-            update_progress("syncing", percent, f"[{idx}/{total}] 粗筛未命中(判定无关): {title}")
-            continue
-            
-        # 粗筛命中，调用 LLM 精细筛选
-        update_progress("syncing", percent, f"[{idx}/{total}] 粗筛命中！正在请求 AI 进行语义精筛: {title}")
+            print(f" -> 帖子 '{title}' 本地粗筛判定为：不相关。已直接去重存库。")
+        else:
+            # 粗筛命中，放入待大模型精筛队列
+            to_eval_topics.append(topic)
+
+    # 4. 并发调用大模型评估（使用线程池并发，并发数设为 8）
+    eval_total = len(to_eval_topics)
+    print(f"\n[初筛结束] 共有 {eval_total} 篇帖子命中了关键词，即将启动 AI 多线程并发研判...")
+    
+    # 定义线程共享锁和已处理计数
+    lock = threading.Lock()
+    processed_count = skipped_count + new_inserted_count # 已经处理完的帖子计数
+    
+    # 主动推一次中间进度
+    initial_percent = int(20 + (processed_count / total) * 75) if total > 0 else 95
+    update_progress("syncing", initial_percent, f"去重与粗筛完成。共 {eval_total} 篇需 AI 研判，正在启动多并发处理池...")
+
+    def process_single_topic(topic):
+        nonlocal processed_count, new_inserted_count, relevant_count
+        
+        title = topic["title"]
+        
+        # 调用大语言模型进行细筛（内部已内置 429 频控及超时重试）
         llm_result = filter.llm_filter(
             title=topic["title"],
             tags=topic["tags"],
             excerpt=topic["excerpt"]
         )
         
-        # 将 LLM 筛选结果合并进帖子数据
         topic.update(llm_result)
         
-        # 插入数据库
+        # 写入数据库去重 (线程安全，使用独立的 Session)
         success = database.insert_topic(topic)
-        if success:
-            new_inserted_count += 1
-            if topic["is_relevant"]:
-                relevant_count += 1
-                print(f" -> [LLM判定相关] 分类: {topic['category']}, 评分: {topic['value_score']} 分")
-                print(f"    AI 摘要: {topic['summary']}")
-                update_progress("syncing", percent, f"[{idx}/{total}] 🤖 AI判定相关 ({topic['category']}): {title}")
-            else:
-                print(" -> [LLM判定不相关] 已存入数据库去重")
-                update_progress("syncing", percent, f"[{idx}/{total}] 🤖 AI判定无关: {title}")
         
+        with lock:
+            processed_count += 1
+            percent = int(20 + (processed_count / total) * 75) if total > 0 else 95
+            
+            if success:
+                new_inserted_count += 1
+                if topic["is_relevant"]:
+                    relevant_count += 1
+                    print(f" -> [AI判定相关] 分类: {topic['category']}, 评分: {topic['value_score']} 分 | 标题: {title}")
+                    update_progress("syncing", percent, f"[{processed_count}/{total}] 🤖 AI判定相关 ({topic['category']}): {title}")
+                else:
+                    print(f" -> [AI判定无关] 已存入数据库去重 | 标题: {title}")
+                    update_progress("syncing", percent, f"[{processed_count}/{total}] 🤖 AI判定无关: {title}")
+            else:
+                print(f" -> [数据库写入失败] 帖子 ID: {topic['id']} | 标题: {title}")
+                update_progress("syncing", percent, f"[{processed_count}/{total}] 处理完毕(数据库写入失败): {title}")
+
+    # 并发数设置在 5-10 之间，默认使用 8 线程
+    MAX_WORKERS = 8
+    
+    if eval_total > 0:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # 开启并发 map
+            executor.map(process_single_topic, to_eval_topics)
+            
+    # 5. 输出报告
     print("-" * 60)
     print(" 运行报告 ")
     print(f" - 本次扫描帖子数: {total} 条")
@@ -117,7 +145,7 @@ def run_pipeline(hours=None, progress_callback=None):
     update_progress(
         "completed", 
         100, 
-        f"同步完成！本次扫描 {total} 条帖子（跳过已存在 {skipped_count} 条，新增入库 {new_inserted_count} 条，AI 筛选出相关贴 {relevant_count} 条）。"
+        f"同步完成！本次共扫描 {total} 条帖子（跳过已存在 {skipped_count} 条，新增入库 {new_inserted_count} 条，AI 筛选出相关贴 {relevant_count} 条）。"
     )
 
 if __name__ == "__main__":

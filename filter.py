@@ -30,11 +30,16 @@ def keyword_filter(title, tags, excerpt):
 def llm_filter(title, tags, excerpt):
     """
     使用 LLM 精细筛选帖子，并获取结构化分类结果 (支持从数据库动态读取配置及 OpenAI / Anthropic 双协议切换)
+    内置了对于 429 速率限制及请求超时的指数退避重试机制
     :param title: 帖子标题
     :param tags: 帖子标签列表
     :param excerpt: 帖子摘要
     :return: 包含 is_relevant, category, summary, value_score 的字典
     """
+    import time
+    import requests
+    from openai import RateLimitError, APITimeoutError
+
     tags_text = ", ".join(tags) if isinstance(tags, list) else str(tags)
     
     # 1. 动态加载最新 LLM 配置
@@ -60,71 +65,100 @@ def llm_filter(title, tags, excerpt):
     
     print(f"[LLM精筛] [{provider.upper()}协议] 正在评估帖子: '{title}' (模型: {model}) ...")
     
+    max_retries = 3
+    backoff_factor = 2 # 指数退避基数 (秒)
+
     try:
-        raw_result = ""
-        
-        # 2. 分协议通道执行请求
-        if provider == "anthropic":
-            import requests
-            headers = {
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            }
-            # 如果是中转地址，使用中转的 url；如果是空，走官方 Anthropic 端点
-            url = base_url if base_url else "https://api.anthropic.com"
-            if not url.endswith("/v1/messages") and not url.endswith("/messages"):
-                url = url.rstrip("/") + "/v1/messages" if "/v1" not in url else url.rstrip("/") + "/messages"
+        for attempt in range(1, max_retries + 1):
+            try:
+                raw_result = ""
                 
-            data = {
-                "model": model,
-                "max_tokens": 500,
-                "messages": [
-                    {"role": "user", "content": f"{system_prompt}\n\n{user_content}"}
-                ]
-            }
-            
-            response = requests.post(url, headers=headers, json=data, timeout=20)
-            response.raise_for_status()
-            resp_json = response.json()
-            raw_result = resp_json["content"][0]["text"].strip()
-        else:
-            # 默认使用 OpenAI 兼容协议
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url=base_url)
-            
-            # 部分大模型可能不支持 json_object 模式，做自适应 fallback
-            response_format = None
-            if "gemini" not in model.lower() and "claude" not in model.lower():
-                response_format = {"type": "json_object"}
+                # 2. 分协议通道执行请求
+                if provider == "anthropic":
+                    headers = {
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    }
+                    # 如果是中转地址，使用中转的 url；如果是空，走官方 Anthropic 端点
+                    url = base_url if base_url else "https://api.anthropic.com"
+                    if not url.endswith("/v1/messages") and not url.endswith("/messages"):
+                        url = url.rstrip("/") + "/v1/messages" if "/v1" not in url else url.rstrip("/") + "/messages"
+                        
+                    data = {
+                        "model": model,
+                        "max_tokens": 500,
+                        "messages": [
+                            {"role": "user", "content": f"{system_prompt}\n\n{user_content}"}
+                        ]
+                    }
+                    
+                    response = requests.post(url, headers=headers, json=data, timeout=20)
+                    # 如果遇到 429 频控，主动抛出 HTTPError 触发重试
+                    if response.status_code == 429:
+                        raise requests.exceptions.HTTPError("429 Too Many Requests", response=response)
+                    response.raise_for_status()
+                    resp_json = response.json()
+                    raw_result = resp_json["content"][0]["text"].strip()
+                else:
+                    # 默认使用 OpenAI 兼容协议
+                    from openai import OpenAI
+                    client = OpenAI(api_key=api_key, base_url=base_url)
+                    
+                    # 部分大模型可能不支持 json_object 模式，做自适应 fallback
+                    response_format = None
+                    if "gemini" not in model.lower() and "claude" not in model.lower():
+                        response_format = {"type": "json_object"}
+                        
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_content}
+                        ],
+                        response_format=response_format,
+                        timeout=20
+                    )
+                    raw_result = response.choices[0].message.content.strip()
+                    
+                # 3. 鲁棒性 JSON 正则提取与解析
+                # 查找匹配第一个出现的大括号 {...} 包裹的内容，免受 ```json 包裹和其它解释杂音的影响
+                json_match = re.search(r"(\{.*\})", raw_result, re.DOTALL)
+                if json_match:
+                    raw_result = json_match.group(1)
+                    
+                result_json = json.loads(raw_result)
                 
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                response_format=response_format,
-                timeout=20
-            )
-            raw_result = response.choices[0].message.content.strip()
-            
-        # 3. 鲁棒性 JSON 正则提取与解析
-        # 查找匹配第一个出现的大括号 {...} 包裹的内容，免受 ```json 包裹和其它解释杂音的影响
-        json_match = re.search(r"(\{.*\})", raw_result, re.DOTALL)
-        if json_match:
-            raw_result = json_match.group(1)
-            
-        result_json = json.loads(raw_result)
-        
-        # 字段安全校验与清洗
-        return {
-            "is_relevant": bool(result_json.get("is_relevant", False)),
-            "category": str(result_json.get("category", "其他")),
-            "summary": str(result_json.get("summary", "无摘要")),
-            "value_score": int(result_json.get("value_score", 1))
-        }
-        
+                # 字段安全校验与清洗并直接返回
+                return {
+                    "is_relevant": bool(result_json.get("is_relevant", False)),
+                    "category": str(result_json.get("category", "其他")),
+                    "summary": str(result_json.get("summary", "无摘要")),
+                    "value_score": int(result_json.get("value_score", 1))
+                }
+                
+            except (RateLimitError, APITimeoutError, requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                # 针对 OpenAI 的限流与超时，或者 requests 级的连接/请求超时错误进行指数退避重试
+                if attempt == max_retries:
+                    print(f"[频控/超时] 已达到最大重试次数 ({max_retries})，抛出异常以触发降级: {e}")
+                    raise e
+                sleep_time = backoff_factor ** attempt
+                print(f"[频控/超时触发] 正在进行第 {attempt} 次重试，缓和等待 {sleep_time} 秒... 错误信息: {e}")
+                time.sleep(sleep_time)
+                
+            except requests.exceptions.HTTPError as e:
+                # 针对 Anthropic 的 429 速率限制错误进行重试
+                is_429 = e.response is not None and e.response.status_code == 429
+                if is_429:
+                    if attempt == max_retries:
+                        print(f"[Anthropic 429频控] 已达到最大重试次数 ({max_retries})，抛出异常以触发降级: {e}")
+                        raise e
+                    sleep_time = backoff_factor ** attempt
+                    print(f"[Anthropic 429频控触发] 正在进行第 {attempt} 次重试，缓和等待 {sleep_time} 秒...")
+                    time.sleep(sleep_time)
+                else:
+                    # 其他非 429 HTTP 错误（如 401 认证失败）不予重试，直接抛出
+                    raise e
     except Exception as e:
         print(f"[LLM错误] 动态通道调用/解析失败: {e}", file=sys.stderr)
         # 容错降级逻辑
