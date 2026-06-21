@@ -49,7 +49,40 @@
 
 ---
 
+## 💻 本地无 Docker 开发与调试教程
+
+如果您想对系统进行二次开发，或者不想使用 Docker 运行，可以分别在本地启动后端和前端服务进行联调：
+
+### 1. 🐍 后端服务启动 (Python)
+1. 建议使用 Python 3.10+ 版本，并在项目根目录下安装依赖：
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. 运行后端 Web 服务（默认采用本地 SQLite 数据库 `data.db`）：
+   ```bash
+   uvicorn server:app --reload --port 8501
+   ```
+   *(启动后可通过 `http://localhost:8501` 访问 API，首访会自动在本地生成数据库表)*
+
+### 2. ⚡ 前端服务启动 (Node)
+1. 进入前端工程目录：
+   ```bash
+   cd frontend
+   ```
+2. 安装 NPM 依赖并运行开发服务器：
+   ```bash
+   npm install
+   # 启动开发服务器
+   npm run dev
+   ```
+3. 浏览器会自动打开并访问 `http://localhost:3000`。
+   > [!TIP]
+   > 前端开发服务（端口 3000）已经通过 [vite.config.js](file:///home/zyb/日志/information_collect/frontend/vite.config.js) 配置了反向代理，会自动将 `/api` 的请求转发至后端的 `http://localhost:8501`。因此本地只需双开即可无缝联调，无需手动处理跨域问题。
+
+---
+
 ## 🐳 本地 Docker 部署教程
+
 
 ### 1. 编译 Docker 镜像
 在项目根目录下，执行以下命令进行本地多阶段打包编译：
