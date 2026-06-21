@@ -120,31 +120,29 @@ def fetch_latest_topics(hours=None, limit=10, proxies=PROXIES):
                 created_at_raw = topic.get("created_at")
                 bumped_at_raw = topic.get("bumped_at") or created_at_raw
                 
-                if not created_at_raw:
+                if not bumped_at_raw:
                     continue
                 
                 try:
-                    created_time = datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
                     bumped_time = datetime.fromisoformat(bumped_at_raw.replace("Z", "+00:00"))
                 except Exception as e:
-                    print(f"[警告] 解析时间失败 (created_at={created_at_raw}, bumped_at={bumped_at_raw}): {e}")
+                    print(f"[警告] 解析最后活跃时间失败 (bumped_at={bumped_at_raw}): {e}")
                     continue
 
-                # 计算小时差
-                create_diff_hours = (now_utc - created_time).total_seconds() / 3600.0
+                # 计算最后活跃时间的小时差
                 bump_diff_hours = (now_utc - bumped_time).total_seconds() / 3600.0
 
                 is_pinned = topic.get("pinned", False) or topic.get("pinned_globally", False)
                 
-                # 1. 只有创建时间在指定时间范围内的新帖子才被收集
-                if create_diff_hours <= hours:
+                # 1. 只有最后活跃时间在指定时间范围内的帖子才被收集
+                if bump_diff_hours <= hours:
                     results.append({
                         "id": topic_id,
                         "title": title,
                         "link": link,
                         "excerpt": excerpt,
                         "tags": tags,
-                        "created_at_raw": created_at_raw
+                        "created_at_raw": bumped_at_raw  # 传递给上层并存入数据库的是最后活跃时间
                     })
                 
                 # 2. 用最后活动时间（Bumped At）作为提前停止爬取的唯一判断依据
@@ -156,13 +154,15 @@ def fetch_latest_topics(hours=None, limit=10, proxies=PROXIES):
                     break
             else:
                 # 若 hours 为 None，则只按原始 limit 数量仅截取第一页即可
+                created_at_raw = topic.get("created_at")
+                bumped_at_raw = topic.get("bumped_at") or created_at_raw
                 results.append({
                     "id": topic_id,
                     "title": title,
                     "link": link,
                     "excerpt": excerpt,
                     "tags": tags,
-                    "created_at_raw": created_at_raw
+                    "created_at_raw": bumped_at_raw
                 })
                 if len(results) >= limit:
                     should_stop = True

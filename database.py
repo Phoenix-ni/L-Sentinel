@@ -117,9 +117,19 @@ def insert_topic(topic_data):
     if check_exists(topic_id):
         return False
 
-    # 归一化 tags 字段
+    # 归一化 tags 字段与时间
     tags_str = json.dumps(topic_data.get("tags", []))
     is_relevant_val = 1 if topic_data.get("is_relevant", False) else 0
+
+    from datetime import datetime
+    created_at_str = topic_data.get("created_at_raw")
+    # 默认使用本地当前时间，如果传入了帖子活跃时间，解析为 UTC 时间入库
+    created_at_val = datetime.now()
+    if created_at_str:
+        try:
+            created_at_val = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        except Exception as e:
+            print(f"[警告] 解析帖子时间 {created_at_str} 失败: {e}")
 
     with get_session() as session:
         try:
@@ -132,11 +142,13 @@ def insert_topic(topic_data):
                 is_relevant=is_relevant_val,
                 category=topic_data.get("category", ""),
                 summary=topic_data.get("summary", ""),
-                value_score=topic_data.get("value_score", 0)
+                value_score=topic_data.get("value_score", 0),
+                created_at=created_at_val
             )
             session.add(db_topic)
             session.commit()
             return True
+
         except Exception as e:
             session.rollback()
             print(f"[数据库错误] 插入帖子 {topic_id} 失败: {e}")
