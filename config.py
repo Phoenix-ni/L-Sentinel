@@ -44,11 +44,10 @@ if "ssl_mode=" in DATABASE_URL:
 
 
 
-# LLM（OpenAI 兼容接口）配置
-# 需求提供：baseurl: https://api.longcat.chat/openai, api_key: ak_2Iz7Ww4KH2440E19yI3n69RN0er2I
-OPENAI_API_KEY = "ak_2Iz7Ww4KH2440E19yI3n69RN0er2I"
-OPENAI_BASE_URL = "https://api.longcat.chat/openai"
-LLM_MODEL = "LongCat-2.0-Preview"
+# LLM（OpenAI 兼容接口）默认配置。实际运行配置优先通过管理界面写入数据库。
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
 
 # 粗筛关键词（用于先期过滤无关帖子，降低 LLM 调用 Token 消耗）
 # 匹配帖子标题、标签和正文摘要

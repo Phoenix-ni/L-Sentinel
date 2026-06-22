@@ -60,8 +60,6 @@ def set_config(key, value):
 
 def init_system_configs():
     """配置项默认初始化"""
-    from config import OPENAI_API_KEY, OPENAI_BASE_URL, LLM_MODEL
-    
     # 默认明文密码（如果无环境变量传入，默认使用 admin123）
     default_pwd = os.getenv("ADMIN_PASSWORD", "admin123")
     default_pwd_hash = hashlib.sha256(default_pwd.encode("utf-8")).hexdigest()
