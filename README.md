@@ -1,6 +1,9 @@
-# linux.do 中转与公益站监控系统
+# Linux.do Relay and Public API Monitoring System
 
-一个面向 [linux.do](https://linux.do/) 论坛的帖子监控与 AI 筛选看板。系统会抓取最新主题，先用本地关键词做粗筛，再调用大语言模型进行语义分类、摘要和价值评分，适合追踪中转站、公益 API、福利优惠和服务异常状态等信息。
+[![English](https://img.shields.io/badge/Language-English-blue)](#)
+[![简体中文](https://img.shields.io/badge/Language-简体中文-green)](README_zh.md)
+
+A post monitoring and AI filtering dashboard for the [linux.do](https://linux.do/) forum. The system fetches the latest topics, performs a rough initial filter using local keywords, and then calls a Large Language Model (LLM) for semantic classification, summarization, and value scoring. It is ideal for tracking relay stations, public APIs, welfare benefits, and service anomalies.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)
@@ -14,15 +17,15 @@
 
 ## Features
 
-- 增量抓取 `linux.do/latest.json`，支持按最近 N 小时收集帖子。
-- 自动跳过已入库帖子，减少重复处理和 LLM 调用成本。
-- 本地关键词粗筛 + LLM 语义精筛，输出分类、摘要、相关性和 1-5 分价值评分。
-- 支持 OpenAI 兼容协议与 Anthropic 协议，可在管理界面动态配置。
-- FastAPI 提供帖子列表、统计数据、后台同步、同步进度和管理员配置接口。
-- Vue 3 前端提供监控看板、系统配置、手动同步和数据概览。
-- APScheduler 每天 08:00 自动抓取过去 24 小时的增量帖子。
-- 默认使用 SQLite，也可通过 `DATABASE_URL` 切换到 MySQL / TiDB Serverless。
-- Docker 多阶段构建，后端可直接托管构建后的前端静态资源。
+- **Incremental Crawling**: Crawls `linux.do/latest.json` and supports collecting posts from the last N hours.
+- **Deduplication**: Automatically skips posts already in the database to reduce redundant processing and LLM API costs.
+- **AI Filtering**: Local keyword rough filtering combined with LLM semantic fine-filtering to output category, summary, relevance, and a value score from 1-5.
+- **Multi-Protocol Support**: Supports OpenAI-compatible and Anthropic protocols, configurable dynamically via the admin dashboard.
+- **FastAPI Backend**: Exposes endpoints for post list, dashboard statistics, background synchronization, sync progress, and admin configuration.
+- **Vue 3 Frontend**: Provides a monitoring dashboard, system settings, manual synchronization, and data overview.
+- **Automated Scheduler**: Uses APScheduler to automatically crawl incremental posts from the past 24 hours daily at 08:00.
+- **Flexible Database**: SQLite by default, with support for switching to MySQL or TiDB Serverless via the `DATABASE_URL` environment variable.
+- **Docker Ready**: Supports multi-stage builds. The backend can directly host the built frontend static assets.
 
 ## Tech Stack
 
@@ -30,8 +33,8 @@
 | --- | --- |
 | Frontend | Vue 3, Vite, Axios |
 | Backend | FastAPI, Uvicorn, Pydantic |
-| Data | SQLAlchemy, SQLite, MySQL / TiDB |
-| Jobs | APScheduler |
+| Data Storage | SQLAlchemy, SQLite, MySQL / TiDB |
+| Jobs / Scheduler | APScheduler |
 | Crawler | `curl_cffi` / `requests` |
 | LLM | OpenAI-compatible API, Anthropic API |
 | Deployment | Docker, Render-compatible |
@@ -45,7 +48,7 @@ pip install -r requirements.txt
 uvicorn server:app --reload --port 8501
 ```
 
-The backend runs at `http://localhost:8501`. On first start it creates the database tables automatically.
+The backend runs at `http://localhost:8501`. On first start, it automatically creates the database tables.
 
 ### 2. Frontend
 
@@ -65,10 +68,9 @@ Open the frontend and sign in with the default password:
 admin123
 ```
 
-On first use, the app will require you to:
-
-- change the admin password to a stronger password;
-- configure the LLM provider, API key, base URL and model name.
+On first use, the application requires you to:
+- Change the admin password to a stronger one.
+- Configure the LLM provider, API key, base URL, and model name.
 
 ## Configuration
 
@@ -78,12 +80,12 @@ Runtime configuration is stored in the database and can be updated from the admi
 | --- | --- |
 | `ADMIN_PASSWORD` | Optional initial admin password or cloud password reset value |
 | `DATABASE_URL` | Optional database URL; defaults to local SQLite `data.db` |
-| LLM provider | `openai` or `anthropic` |
-| LLM API key | Stored in database after setup |
-| LLM base URL | Supports official endpoints or compatible gateways |
-| LLM model | Model used for semantic filtering |
+| LLM Provider | `openai` or `anthropic` |
+| LLM API Key | Stored in database after setup |
+| LLM Base URL | Supports official endpoints or compatible gateways |
+| LLM Model | Model used for semantic filtering |
 
-For public repositories, do not commit real API keys, database URLs, cookies or proxy credentials.
+For public repositories, do not commit real API keys, database URLs, cookies, or proxy credentials.
 
 ## Docker
 
@@ -127,10 +129,9 @@ ADMIN_PASSWORD=<your-initial-admin-password>
 ```
 
 Notes:
-
-- If `DATABASE_URL` starts with `mysql://`, the app rewrites it to `mysql+pymysql://`.
-- If the platform sleeps idle containers, use an external uptime monitor to request `/api/stats` periodically so the scheduler can keep running.
-- The daily scheduled job uses the `Asia/Shanghai` timezone and runs at 08:00.
+- If `DATABASE_URL` starts with `mysql://`, the application automatically rewrites it to `mysql+pymysql://`.
+- If the platform sleeps idle containers, use an external uptime monitor to request `/api/stats` periodically to keep the scheduler running.
+- The daily scheduled job runs at 08:00 in the `Asia/Shanghai` timezone.
 
 ## CLI Usage
 
@@ -140,7 +141,7 @@ You can run the collection pipeline without starting the web server:
 python main.py --hours 24
 ```
 
-This fetches topics active in the last 24 hours, filters them and writes results to the configured database.
+This fetches topics active in the last 24 hours, filters them, and writes results to the configured database.
 
 ## Project Structure
 
@@ -168,7 +169,7 @@ This fetches topics active in the last 24 hours, filters them and writes results
 
 ## API Overview
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Auth Required | Description |
 | --- | --- | --- | --- |
 | `GET` | `/api/topics` | No | List saved topics |
 | `GET` | `/api/stats` | No | Return dashboard statistics |
